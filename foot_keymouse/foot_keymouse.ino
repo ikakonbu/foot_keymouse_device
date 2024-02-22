@@ -114,6 +114,22 @@ int sounds[3] = {0,0,0};
 //内部フラグおわり
 
 
+//いい感じのイージング関数
+float easing(float input){
+   if(input < 0){
+      return 0.0;
+   }
+   if(input > 1){
+      return 1.0;
+   }
+
+   if(input > 0.5){
+      return 4 * pow(input,3);
+   } else {
+      return 1 - (pow(2-2*input,3)/2);
+   }
+}
+
 //速度をマウス出力にする比較的簡易なコード
 void mouse_calc3(int mousex, int mousey){
   int i, minusflag;
@@ -127,7 +143,7 @@ void mouse_calc3(int mousex, int mousey){
     float theta = mousedeltas[0]*(mouseinput[0]) + mousedeltas[1]*(mouseinput[1]);
     theta /= sqrt((mousedeltas[0]*mousedeltas[0] + mousedeltas[1]*mousedeltas[1]))*sqrt((mouseinput[0])*(mouseinput[0]) + (mouseinput[1])*(mouseinput[1]));
     if(theta > 0) {
-      mousedeltas[i]=0;
+      mousedeltas[i]/=3;
     } 
     if(mousedeltas[i] < 0){
       minusflag = 1;
@@ -163,7 +179,7 @@ void mouse_calc2(int mousex, int mousey){
 //抵抗値→マウスの移動量に変換する
 void mouse_calc(int mousex, int mousey){
   const float params[9][4] = {
-    {1.5, 0.7, 24, 1.4},
+    {1.5, 0.7, 24, 2},
     {0.5, 0.7, 24, 2},
     {1,   0.7, 24, 2},
     {1.5, 0.7, 24, 2},
@@ -177,6 +193,7 @@ void mouse_calc(int mousex, int mousey){
   //2次曲線 + 操作時の速度モデル
   static float offset[2] = {512,512}; //初期位置
   static float deadzone = 300; //デットゾーン半径
+  static float deadzone2 = 450;
   static float pow_exp = 1.5; //位置曲線の指数倍数
   static float delta_pow_exp = 0.7; //速度の指数倍数
   static float maxrate = 30;  //位置による最大マウス速度(x,y方向それぞれ)
@@ -197,6 +214,7 @@ void mouse_calc(int mousex, int mousey){
   mouseinput[0] = float(mousex);
   mouseinput[1] = float(mousey);
   float nativeinput[2] = {mousex-512, mousey-512};
+  float inputnorm = sqrt(nativeinput[0]*nativeinput[0]+nativeinput[1]*nativeinput[1]);
   float theta = 0;
 
   //速度による影響度合いの決定
@@ -206,7 +224,7 @@ void mouse_calc(int mousex, int mousey){
     //ゴムで初期位置に戻しても実際はいくらかズレるので40pxのデットゾーンを設定。
     theta = mousedeltas[0]*(mouseinput[0]-offset[0]) + mousedeltas[1]*(mouseinput[1]-offset[1]);
     theta /= sqrt((mousedeltas[0]*mousedeltas[0] + mousedeltas[1]*mousedeltas[1]))*sqrt((mouseinput[0]-offset[0])*(mouseinput[0]-offset[0]) + (mouseinput[1]-offset[1])*(mouseinput[1]-offset[1]));
-    if(theta > 0 || sqrt(nativeinput[0]*nativeinput[0]+nativeinput[1]*nativeinput[1]) < 40) {
+    if(theta > 0 || inputnorm < 40) {
       mousedeltas[i]=0;
     } 
     if(mousedeltas[i] < 0){
@@ -214,7 +232,13 @@ void mouse_calc(int mousex, int mousey){
     }else{
       minusflag = 0;
     }
-    mousedeltas[i] = pow(abs(mousedeltas[i]), delta_pow_exp);
+  }
+
+    float temp_norm = pow((mousedeltas[0]*mousedeltas[0]+mousedeltas[1]*mousedeltas[1]),0.5);
+    float compute_norm = pow(temp_norm,delta_pow_exp);
+
+  for(i=0; i<2; i++){
+    mousedeltas[i] = mousedeltas[i] * (compute_norm / temp_norm);
     if(minusflag==1) mousedeltas[i] *= -1;
     mousedeltas[i] *= move_delta_factor;
 
@@ -224,11 +248,10 @@ void mouse_calc(int mousex, int mousey){
   for(i=0; i<2; i++){
     mouseinput[i] -= offset[i];
     //デットゾーン内部なら0にして、それ以外ではデットゾーン分を引いたベクトルを求める
-    if(sqrt(nativeinput[0]*nativeinput[0]+nativeinput[1]*nativeinput[1]) < float(deadzone)) {
+    if(inputnorm < float(deadzone)) {
       mouseinput[i] = 0;
     } else {
-      float norm = sqrt(nativeinput[0]*nativeinput[0]+nativeinput[1]*nativeinput[1]);
-      float normratio = 1- (deadzone/norm);
+      float normratio = 1- (deadzone/inputnorm);
       mouseinput[i] = (mouseinput[i] * normratio);
     }
     if(mouseinput[i]<0){
@@ -237,7 +260,13 @@ void mouse_calc(int mousex, int mousey){
       minusflag = 0;
     }
     mouseinput[i] /= (512 - deadzone);
-    mouseinput[i] = pow(abs(mouseinput[i]), pow_exp);
+}
+
+    temp_norm = pow((mouseinput[0]*mouseinput[0]+mouseinput[1]*mouseinput[1]),0.5);
+    compute_norm = pow(temp_norm,pow_exp);
+
+for(i=0; i<2; i++){
+    mouseinput[i] = mouseinput[i] * (compute_norm / temp_norm);
     mouseinput[i] *= maxrate;
     if(minusflag==1) mouseinput[i] *= -1;
     //素早く中心に戻そうとする動きの時は移動を0にする
@@ -247,19 +276,34 @@ void mouse_calc(int mousex, int mousey){
   }
   
 
-  //基本的には合算して、両者のベクトルの合算値が最大マウス速度を1.5倍以上上回る場合は速度項のみ抽出
-  float sumvec_norm = sqrt((mouseinput[0]-mousedeltas[0])*(mouseinput[0]-mousedeltas[0])+(mouseinput[1]-mousedeltas[1])*(mouseinput[1]-mousedeltas[1]));
-  float delta_norm = sqrt(mousedeltas[0]*mousedeltas[0] + mousedeltas[1]*mousedeltas[1]);
-  if(sumvec_norm > maxrate*1.5 && delta_norm < 3){
+  //イージング関数で合算する
+  if(inputnorm > deadzone && inputnorm < deadzone2){
+      float q = (inputnorm - deadzone) / (deadzone2 - deadzone);
+      float eq = easing(q);
+      mouseoutput[i] = int((1-eq)*-1*mousedeltas[i]) + int(eq * mouseinput[i]);
+  } else if(inputnorm <= deadzone) {
     for(i=0; i<2; i++){
       mouseoutput[i] = int(-1*mousedeltas[i]);
     }
   } else {
     for(i=0; i<2; i++){
-      mouseinput[i] -= mousedeltas[i];
       mouseoutput[i] = int(mouseinput[i]);
     }
   }
+
+  /*
+    float delta_norm = sqrt(mousedeltas[0]*mousedeltas[0] + mousedeltas[1]*mousedeltas[1]);
+    if(sumvec_norm > maxrate*1.5 && delta_norm < 3){
+      for(i=0; i<2; i++){
+        mouseoutput[i] = int(-1*mousedeltas[i]);
+      }
+    } else {
+      for(i=0; i<2; i++){
+        mouseinput[i] -= mousedeltas[i];
+        mouseoutput[i] = int(mouseinput[i]);
+      }
+    }
+  */
 
   lastmouseinput[0] = mousex;
   lastmouseinput[1] = mousey;
@@ -278,6 +322,8 @@ void soundset(int i, int j, int k){
   sounds[1] = j;
   sounds[2] = k;
 }
+
+
 //入力処理
 void input(){
   mouseinput[0] = analogRead(MOUSEPIN_X);
